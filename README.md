@@ -2,6 +2,8 @@
 
 > camaro is an utility to transform XML to JSON, using Node.js binding to native XML parser [pugixml](http://pugixml.org/), one of the fastest XML parser around.
 
+## Forked from:
+
 [![npm](https://raster.shields.io/npm/v/camaro)](https://npm.im/camaro)
 ![Build status](https://github.com/tuananh/camaro/workflows/CI/badge.svg)
 [![npm](https://raster.shields.io/npm/dt/camaro)](https://npm.im/camaro)
@@ -24,6 +26,10 @@
     * Scale well with multi-core processor by use of `worker_threads` pool (Node >= 12).
 
 * Pretty print XML.
+
+* Date, time, datetime reformat are supported
+  * Use datetime(XPATH), time:(XPATH) or date(XPATH) sentences in template for getting ISO 8601 datetime representation
+ 
 
 ## 🔥 Benchmark
 

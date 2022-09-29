@@ -4,11 +4,14 @@
 #include <emscripten/bind.h>
 #include <emscripten/val.h>
 #include <stack>
+#include <regex>
+#include <vector>
 
 using namespace emscripten;
 using string = std::string;
 using xquery = pugi::xpath_query;
 using nodeset = pugi::xpath_node_set;
+
 
 // See https://github.com/nlohmann/json#notes
 // See https://github.com/nlohmann/json/issues/485#issuecomment-333652309
@@ -18,7 +21,7 @@ using my_workaround_fifo_map =
     nlohmann::fifo_map<K, V, nlohmann::fifo_map_compare<K>, A>;
 using json = nlohmann::basic_json<my_workaround_fifo_map>;
 
-enum ReturnType { T_NUMBER, T_STRING, T_BOOLEAN };
+enum ReturnType { T_NUMBER, T_STRING, T_BOOLEAN, T_DATETIME, T_DATE, T_TIME };
 
 template <typename T> void walk(T &doc, json &n, val &output, string key);
 
@@ -33,6 +36,18 @@ ReturnType get_return_type(string &path) {
   case 'b':
     if (start_with(path, "boolean(")) {
       t = T_BOOLEAN;
+    }
+    break;
+  case 'd':
+    if (start_with(path, "datetime(")) {
+      t = T_DATETIME;
+    } else if (start_with(path, "date(")) {
+     t = T_DATE;
+    }
+    break;
+  case 't':
+    if (start_with(path, "time(")) {
+      t = T_TIME;
     }
     break;
   case 'c':
@@ -92,6 +107,64 @@ template <typename T> double query_number(T &xnode, json &j) {
   return query.evaluate_number(xnode);
 }
 
+template <typename T> string query_datetime(T &xnode, json &j, ReturnType t) {
+    struct tm tm = {0};
+    string path = j.get<string>();
+    string out_format;
+    string val;
+    if (t == T_DATETIME) {
+        out_format = "%Y-%m-%dT%H:%M:%S";
+        val =  path.substr(9, path.size()-10);
+    } else  {
+        val =  path.substr(5, path.size()-6);
+        if (t == T_TIME) {
+            out_format = "%H:%M:%S";
+        } else {
+            out_format = "%Y-%m-%d";
+        }
+    }
+    xquery query(val.c_str());
+    string nodetext = query.evaluate_string(xnode);
+    string suffix="";
+    string formats[] = {
+            "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y%m%dT%H%M%S", "%Y%m%d%H%M%S",
+            "%Y-%m-%dT%H:%M", "%Y-%m-%d %H:%M", "%Y%m%dT%H%M", "%Y%m%d%H%M",
+            "%Y-%m-%d", "%Y%m%d", "%Y-%m", "%Y%m", "%Y", "%H:%M", "%H:%M:%S"
+        };
+
+    if (t == T_DATETIME || t == T_TIME) {
+        std::cmatch m;
+        const std::regex re("([+-][0-9]{2,4})$");
+        const std::regex reZ("Z$");
+        const std::regex reZname("([A-Za-z]+)$");
+
+        if (strlen(nodetext.c_str())>10 &&  std::regex_search(nodetext.c_str(), m, re)) {
+            string sZ(m[0]);
+            suffix =  sZ;
+        } else if (strlen(nodetext.c_str())>10 &&  std::regex_search(nodetext.c_str(), m, reZ)) {
+            suffix = "+0000";
+        } else if (strlen(nodetext.c_str())>10 &&  std::regex_search(nodetext.c_str(), m, reZname)) {
+          string sZ(m[0]);
+          suffix = " "+sZ;
+        } else {
+            suffix = "+0000";
+        }
+    }
+
+
+    int i=0;
+    while (i < 15) {
+         if (strptime(nodetext.c_str(), formats[i].c_str(), &tm)) {
+             char date_string[100];
+             strftime(date_string, 50, out_format.c_str(), &tm);
+             string s(date_string);
+             return s+suffix;
+         }
+        i++;
+    }
+    return nodetext;
+}
+
 template <typename T> val query_array(T &doc, json &node) {
   std::vector<val> arr;
 
@@ -126,6 +199,9 @@ template <typename T> val query_array(T &doc, json &node) {
       if (type == T_BOOLEAN) {
         arr.push_back(val(query_boolean(n, inner)));
       }
+      if (type == T_DATETIME || type == T_DATE || type == T_TIME) {
+        arr.push_back(val(query_datetime(n, inner, type)));
+      }
     }
   }
 
@@ -155,6 +231,9 @@ template <typename T> void walk(T &doc, json &n, val &output, string key) {
       output.set(key, "");
     } else {
       ReturnType type = get_return_type(path);
+       if (type == T_DATETIME || type == T_DATE || type == T_TIME) {
+        output.set(key, query_datetime(doc, n, type));
+       }
       if (type == T_NUMBER) {
         output.set(key, query_number(doc, n));
       }
